@@ -237,9 +237,14 @@ async def arm_detached_orphan_close(authority, session_id):
 
 def _idle_s(authority, session_id):
     from hermes_state_common import _sql_session_last_active
+    # Resolve the physical target BEFORE opening the read context: _physical_target reads the
+    # store itself, and under DELETE journal mode every _read_ctx serializes on the
+    # non-reentrant writer lock. A nested read there self-deadlocks the gateway event loop
+    # (WAL reads use the pool and never take the lock).
+    target = _physical_target(authority, session_id)
     with authority.db._read_ctx() as conn:
         row = conn.execute(f'SELECT {_sql_session_last_active("s")} FROM sessions s WHERE s.id = ?',
-                           (_physical_target(authority, session_id),)).fetchone()
+                           (target,)).fetchone()
     return time.time() - row[0] if row and row[0] else 0.0
 
 
